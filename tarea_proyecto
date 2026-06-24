@@ -1,0 +1,287 @@
+Sistemas Operativos CS3015 2026-
+
+# Proyecto 2: Memory Mappings en Selfie
+
+Profesores Jorge Gonzalez, Mauricio Pinto
+TAs Mariana Capu ̃nay
+
+## 1 Implementar la syscall mmap en Selfie
+
+La syscall mmap permite crear un mapping entre una regi ́on de memoria virtual de un proceso y una regi ́on de un
+archivo. En esta implementaci ́on simplificada para Selfie, el mapping deber ́a asociar un rango de direcciones vir-
+tuales del proceso con p ́aginas f ́ısicas almacenadas en el page cache. Estas p ́aginas f ́ısicas contendr ́an el contenido
+del archivo a partir de un determinado offset. De esta manera agregamos la posibilidad de que m ́ultiples procesos
+compartan acceso a un archivo sin necesidad de acceder a memoria secundaria. Esta relaci ́on deber ́a registrarse
+en el contexto del proceso mediante un atributo mappings. Cada entrada de mappings describir ́a un rango de
+direcciones virtuales del proceso y el archivo asociado a dicho rango.
+
+Para este proyecto, se debe considerar el tama ̃no de p ́agina utilizado por Selfie, definido por PAGESIZE. En la
+implementaci ́on base, PAGESIZE corresponde a 4096 bytes. Este valor deber ́a usarse para calcular la cantidad de
+p ́aginas necesarias, alinear direcciones y validar offsets.
+
+```
+La llamada propuesta para Selfie puede definirse usando valores de tipo uint64t:
+```
+```
+uint64 ̇t mmap(uint64 ̇t addr, uint64 ̇t length, uint64 ̇t prot, uint64 ̇t fd, uint64 ̇t offset);
+```
+```
+Donde:
+```
+- addr: direcci ́on virtual inicial donde se desea crear el mapping. Si addr = 0, Selfie puede elegir una regi ́on
+    virtual libre.
+- length: cantidad de bytes que se desea mapear. Internamente, este valor puede redondearse hacia arriba al
+    m ́ultiplo de PAGESIZE m ́as cercano.
+- prot: permisos del mapping. Por ejemplo, 0 para lectura, 1 para escritura y 2 para lectura/escritura.
+- fd: file descriptor (identificador) del archivo cuyo contenido ser ́a mapeado.
+
+```
+Nota
+```
+```
+En Selfie, el file descriptor (fd) es un identificador local al proceso. Por ello, un mismo valor de fd
+no identifica globalmente al mismo archivo en todos los procesos. Dos procesos podr ́ıan tener valores
+distintos de fd para referirse al mismo archivo, o incluso el mismo valor de fd para referirse a archivos
+diferentes.
+```
+- offset: posici ́on inicial dentro del archivo desde donde comenzar ́a el mapping. Se recomienda que sea
+    m ́ultiplo de PAGESIZE.
+
+```
+Importante
+```
+```
+La syscall mmap no debe escribir cambios en el archivo al momento de crear el mapping. Su funci ́on principal
+es crear la relaci ́on entre memoria virtual, tabla de p ́aginas y page cache.
+```
+Los cambios realizados por el proceso sobre la memoria mapeada se almacenan inicialmente en los cache
+frames. Para este proyecto, dichos cambios se escribir ́an en el archivo ́unicamente cuando el proceso invoque
+msync. Para comparar esta implementaci ́on simplificada con el comportamiento real en Linux, se recomienda
+revisar la documentaci ́on oficial de mmap, la cual est ́a disponible en https://man7.org/linux/man-pages/man2/
+mmap.2.html.
+
+Junio, 2026
+
+
+```
+Importante
+```
+```
+Para este proyecto, considerar que cada test trabajar ́a con mappings asociados a un ́unico archivo.
+```
+```
+Espacio de direcciones
+virtual del proceso
+0x
+```
+```
+0xFFFF
+```
+```
+..
+.
+```
+```
+..
+.
+```
+```
+mmap
+(addr, length)
+```
+```
+Tabla de
+p ́aginas
+```
+```
+...
+```
+```
+..
+.
+```
+-
+-
+-
+
+```
+Cache frames
+en memoria f ́ısica
+```
+```
+frame F 0
+frame F 1
+frame F 2
+..
+.
+```
+```
+Page cache
+entries
+```
+```
+(fileid, 0) -¿ F 0
+(fileid, 4096) -¿ F 1
+(fileid, 8192) -¿ F 2
+..
+.
+```
+```
+Archivo
+```
+```
+file page 0
+offset 0
+file page 1
+offset 4096
+file page 2
+offset 8192
+..
+.
+```
+```
+mmap crea entradas en context-¿mappings y actualiza la tabla de
+p ́aginas para que las direcciones virtuales apunten a cache frames. El
+page cache permite encontrar esos frames usando fileid y offset.
+```
+Figure 1: Relaci ́on entre memoria virtual, tabla de p ́aginas, page cache, frames f ́ısicos y archivo en una imple-
+mentaci ́on simplificada de mmap.
+
+## 2 Implementar syscall munmap en Selfie
+
+La syscall munmap elimina un mapping previamente creado. Para este proyecto, deber ́a definirla como:
+
+```
+uint64 ̇t munmap(uint64 ̇t addr);
+```
+A diferencia de Linux, esta versi ́on simplificada no recibe length. Por ello, addr debe coincidir con la direcci ́on
+virtual inicial de un mapping previamente registrado en context-¿mappings.
+En Linux, munmap recibe tanto la direcci ́on inicial como el tama ̃no del rango a desmapear; por lo tanto, se
+recomienda revisar la documentaci ́on oficial (disponible en https://man7.org/linux/man-pages/man2/mmap.2.
+html) para entender la diferencia con la versi ́on reducida propuesta en este proyecto.
+En esta versi ́on simplificada de Selfie, munmap no debe escribir los cambios en el archivo asociado. Su funci ́on
+ser ́a eliminar la relaci ́on entre el rango de memoria virtual del proceso y las p ́aginas f ́ısicas del page cache. Por lo
+tanto, si el proceso modifica una regi ́on mapeada y luego invoca ́unicamente munmap, dichos cambios no deber ́an
+persistir en el archivo. La escritura de cambios al archivo deber ́a realizarse ́unicamente mediante msync.
+
+## 3 Implementar msync en Selfie
+
+La syscall msync debe permitir que los cambios realizados sobre una regi ́on mapeada en memoria se escriban de
+vuelta en el archivo asociado. En este proyecto, msync ser ́a el ́unico mecanismo encargado de persistir en el archivo
+los cambios hechos sobre una regi ́on mapeada.
+
+```
+Nota
+```
+```
+Pueden utilizar la syscall write para realizar la actualizaci ́on del archivo o crear una nueva syscall msync.
+```
+En Linux, msync sincroniza con el sistema de archivos los cambios hechos sobre una regi ́on previamente mapeada
+con mmap. Una versi ́on simplificada de esta syscall en Selfie es:
+
+```
+uint64 ̇t msync(uint64 ̇t addr);
+```
+En esta versi ́on, addr debe coincidir con la direcci ́on virtual inicial de un mapping previamente registrado en
+context-¿mappings. A partir de esta direcci ́on, Selfie debe identificar el archivo asociado, el offset inicial y el
+tama ̃no del mapping.
+
+Para comparar esta implementaci ́on simplificada con el comportamiento real en Linux, se recomienda revisar la
+documentaci ́on oficial de msync: https://man7.org/linux/man-pages/man2/msync.2.html
+
+
+## 4 Pasos sugeridos
+
+1. Agregar un atributo mappings al contexto; para cada mapping debe guardar como m ́ınimo:
+    - Address inicial para mapear el page virtual
+    - Offset desde el que se hace el mapping del archivo. Se recomienda que el offset sea divisible por
+       PAGESIZE.
+    - Tama ̃no del mapping.
+    - File descriptor o identificador del archivo asociado al mapping.
+2. Crear un espacio reservado para los cache frames. Podemos crear un bloque de memoria separado de la
+    memoria principal de selfie. Para ello, guiarnos de la funci ́on initmemory.
+3. Crear una lista de entries del page cache. Para ello podemos:
+    - Crear un bloque de memoria fijo de un tama ̃no razonable para almacenar entries.
+    - Crear una lista enlazada para almacenar entries.
+
+```
+Cada entry debe contener la informaci ́on ilustrada en la Tabla 4
+```
+```
+Hint
+```
+```
+Puedes revisar la implementaci ́on de las syscalls read o write para comprender la lectura y escritura de
+archivos desde Selfie.
+```
+```
+Nota
+```
+```
+Un cache frame es una p ́agina f ́ısica. A diferencia de las p ́aginas virtuales, los cache frames no pertenecen
+a un proceso espec ́ıfico. Estos pueden ser compartidos por varios procesos cuando sus mappings apuntan a
+la misma p ́agina de un archivo. Para identificar qu ́e contenido almacena cada cache frame, el page cache
+mantiene entradas asociadas al archivo y al offset de p ́agina correspondiente.
+```
+```
+File ID File page offset Cache frame
+23 0 P
+23 4096 P
+23 8192 P
+```
+```
+Table 1: Ejemplo de entradas almacenadas en el page cache.
+```
+Cada entrada del page cache indica qu ́e cache frame contiene una p ́agina espec ́ıfica del archivo. Ese frame
+puede ser compartido por varios procesos si sus mappings apuntan al mismo archivo y al mismo offset de
+p ́agina.
+
+```
+Nota
+```
+```
+Pueden mapear el archivo completo, y en el mapping de cada proceso s ́olo mantener una referencia a la
+porci ́on mapeada por ese proceso.
+```
+Al acceder a una direcci ́on presente en un mapeo creado con mmap, se debe realizar la traducci ́on a direcci ́on
+f ́ısica de la siguiente manera:
+
+- Verificamos si una direcci ́on se encuentra dentro del rango de un mapping.
+- Si no est ́a dentro del rango, procedemos a traducir la memoria de manera normal. Sin embargo, si est ́a
+    dentro de un mapping, debemos:
+       - Hallar el cache frame al que se encuentra mapeada la page.
+       - Sumar el offset de la direcci ́on base del cache frame.
+
+
+```
+Importante
+```
+```
+Se les entregar ́a una versi ́on funcional de fork-wait. Si un proceso realiza fork despu ́es de haber creado
+un mapping, el proceso hijo debe heredar los mappings del proceso padre. Las p ́aginas f ́ısicas del page cache
+no deben duplicarse. Tanto el padre como el hijo deben mapear sus p ́aginas virtuales a los mismos cache
+frames.
+```
+## 5 Entregables
+
+1. Carpeta .zip con:
+    - Archivo selfie.c
+    - Archivos de test
+2. Tests que validen la correctitud de su implementaci ́on:
+    - Al menos un test en el cu ́al se cree un mapping de un archivo y se lea su contenido directamente de
+       memoria.
+    - Al menos un test en el cu ́al se cree un mapping de un archivo y se escriba sobre este, mostrando
+       posteriormente el cambio en memoria secundaria.
+    - Al menos un test en el cu ́al dos procesos crean un mapping del mismo archivo y lo modifican, siendo
+       capaces de observar estos cambios en memoria.
+3. Presentaci ́on de 12 minutos donde presentan brevemente sus ideas, metodolog ́ıa y muestran una demo de
+    sus tests. Las diapositivas tambi ́en ser ́an calificadas.
+
+```
+Importante
+```
+```
+Se revisar ́an peri ́odicamente sus avances durante sesiones de clase. Estas revisiones tomar ́an parte de
+la nota.
+```
+
